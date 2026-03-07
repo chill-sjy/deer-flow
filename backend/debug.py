@@ -49,7 +49,7 @@ async def main():
             "thinking_enabled": True,
             "is_plan_mode": True,
             # Uncomment to use a specific model
-            "model_name": "kimi-k2.5",
+            "model_name": "qwen3.5-plus",
         }
     }
 
