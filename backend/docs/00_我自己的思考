@@ -1,0 +1,3 @@
+### AppConfig.loadConfig
+1. 加载配置，除了config.yaml还有本地的 env，然后env 不属于代码的一部分，可以加载后再替换
+2. 在这个维度里面pydantic import BaseModel非常重要，还有比如model_dump()会转成 dict，而model_validate从 dict 转到 Pydantic 模型
