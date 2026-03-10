@@ -206,10 +206,12 @@ class MyMiddleware(AgentMiddleware):
     def before_agent(self, state, runtime) -> dict | None:
         """整个 Agent 开始前执行（每次 invoke 调用一次）"""
         # 常用于：初始化资源（沙箱、路径）、注入上下文
+        # ⚠️ 「这个 Agent」指的是注册了本 Middleware 的那个 agent 实例
 
     def before_model(self, state, runtime) -> dict | None:
         """每次调用 LLM 前执行（ReAct 循环每轮调用）"""
         # 常用于：消息摘要、裁剪 context window、动态 prompt 注入
+        # ⚠️ 指的是 create_agent(model=...) 传入的那个 LLM，每轮 ReAct 循环触发一次
 
     def after_model(self, state, runtime) -> dict | None:
         """每次 LLM 返回后执行（在判断是否有 tool call 之前）"""
@@ -218,13 +220,54 @@ class MyMiddleware(AgentMiddleware):
     def after_agent(self, state, runtime) -> dict | None:
         """整个 Agent 完成后执行（最终回答输出后）"""
         # 常用于：生成标题、写入记忆、触发异步任务
+        # ⚠️ 同 before_agent，只对注册了本 Middleware 的那个 agent 实例触发
 
     def wrap_tool_call(self, call, handler):
         """包装工具调用（在 tools 节点执行时）"""
         # 常用于：工具调用重试、错误处理、审计日志
+        # ⚠️ 对该 agent 本轮触发的【所有】工具调用均生效，无法在注册时指定只拦截某个工具
+        # 若要针对特定工具，在方法内部用 request.tool_call["name"] 判断
 ```
 
 返回值是 `dict`（State 的增量更新）或 `None`（不修改 State）。
+
+#### before_agent / after_agent 指的是「哪个 Agent」？
+
+Middleware 是**绑定在某个具体 agent 实例上**的，不是全局的。`before_agent` / `after_agent` 只对注册了它的那个 agent 实例触发，每次 `invoke` / `astream` 调用触发一次。
+
+本项目有 Lead Agent 和 Subagent 两种角色：
+
+```
+Lead Agent 的 before_agent  ← 触发（Lead Agent 的 Middleware）
+    ↓
+  ReAct 循环...
+    ↓ LLM 决定调用 create_task 工具
+    ↓ 派生出 Subagent 实例（独立运行，有自己的 Middleware，或没有）
+    ↓ Subagent 执行完毕，返回 ToolMessage 给 Lead Agent
+    ↓
+Lead Agent 的 after_agent   ← 触发（Lead Agent 的 Middleware）
+```
+
+Subagent 的执行不会触发 Lead Agent Middleware 里的 `before_agent` / `after_agent`，两者是独立的。
+
+#### wrap_tool_call 指的是「哪个 tool」？
+
+`wrap_tool_call` **对该 agent 所有工具调用均生效**，无法在注册 Middleware 时指定只拦截某个工具。如果 LLM 一次性生成了多个并行 tool_call，`wrap_tool_call` 会对每个 tool_call 分别触发一次。
+
+若要针对特定工具做不同处理，在方法体内判断工具名：
+
+```python
+def wrap_tool_call(self, request, handler):
+    if request.tool_call["name"] == "bash":
+        # 只对 bash 工具做重试
+        for attempt in range(3):
+            try:
+                return handler(request)
+            except Exception:
+                if attempt == 2: raise
+    # 其他工具走正常流程
+    return handler(request)
+```
 
 ### 4.3 自定义 State Schema
 
